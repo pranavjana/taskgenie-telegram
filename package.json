@@ -8,11 +8,18 @@
     "dev": "node bot/bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["telegram", "bot", "productivity", "reminders", "taskgenie"],
+  "keywords": [
+    "telegram",
+    "bot",
+    "productivity",
+    "reminders",
+    "taskgenie"
+  ],
   "author": "TaskGenie Team",
   "license": "ISC",
   "dependencies": {
     "dotenv": "^16.5.0",
+    "express": "^5.1.0",
     "telegraf": "^4.16.3"
   },
   "engines": {

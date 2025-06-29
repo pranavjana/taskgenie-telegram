@@ -1,9 +1,12 @@
 require("dotenv").config(); // For loading environment variables from .env file
 const { Telegraf } = require("telegraf");
 const { fmt, bold, italic, link } = require("telegraf/format");
+const express = require("express");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEB_APP_VERIFY_ENDPOINT = process.env.WEB_APP_VERIFY_ENDPOINT; // Your Next.js endpoint
+const WEBHOOK_URL = process.env.WEBHOOK_URL; // For production webhook
+const PORT = process.env.PORT || 3000; // Port for Express server
 // const AI_CHAT_ENDPOINT = process.env.AI_CHAT_ENDPOINT || 'http://localhost:3000/api/ai/chat'; // Fixed default port
 // const CONVERSATION_ENDPOINT = process.env.CONVERSATION_ENDPOINT || 'http://localhost:3000/api/telegram/conversation'; // Fixed default port
 
@@ -532,22 +535,91 @@ Type /help for more information.`);
 // TODO: Add reminder notification functionality here
 // This is where you would add code to handle sending reminder notifications to users
 
-bot
-  .launch()
-  .then(() => {
-    console.log("🚀 TaskGenie Telegram bot started successfully!");
-    console.log("✅ Production features active:");
-    console.log("   • Welcome messages");
-    console.log("   • Account verification");
-    console.log("   • User guidance");
-    console.log("   • Help system");
-    console.log("🔄 Ready for reminder notifications");
-    console.log("🤖 AI features: In development");
-  })
-  .catch((err) => {
-    console.error("❌ Failed to start TaskGenie Telegram bot:", err);
+// Create Express app for webhook
+const app = express();
+app.use(express.json());
+
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.json({ 
+    status: "TaskGenie Telegram Bot is running!",
+    timestamp: new Date().toISOString(),
+    features: ["welcome messages", "account verification", "reminder notifications"]
   });
+});
+
+// Webhook endpoint
+app.post("/webhook", (req, res) => {
+  bot.handleUpdate(req.body);
+  res.sendStatus(200);
+});
+
+// Start the server
+async function startBot() {
+  try {
+    if (WEBHOOK_URL) {
+      // Production mode - use webhooks
+      console.log("🌐 Starting in WEBHOOK mode...");
+      
+      // Set webhook
+      await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
+      console.log(`📡 Webhook set to: ${WEBHOOK_URL}/webhook`);
+      
+      // Start Express server
+      app.listen(PORT, () => {
+        console.log("🚀 TaskGenie Telegram bot started successfully!");
+        console.log(`🌐 Server running on port ${PORT}`);
+        console.log("✅ Production features active:");
+        console.log("   • Welcome messages");
+        console.log("   • Account verification");
+        console.log("   • User guidance");
+        console.log("   • Help system");
+        console.log("🔄 Ready for reminder notifications");
+        console.log("🤖 AI features: In development");
+      });
+    } else {
+      // Development mode - use polling
+      console.log("🔄 Starting in POLLING mode (development)...");
+      await bot.launch();
+      console.log("🚀 TaskGenie Telegram bot started successfully!");
+      console.log("✅ Development features active:");
+      console.log("   • Welcome messages");
+      console.log("   • Account verification");
+      console.log("   • User guidance");
+      console.log("   • Help system");
+      console.log("🔄 Ready for reminder notifications");
+      console.log("🤖 AI features: In development");
+    }
+  } catch (error) {
+    console.error("❌ Failed to start TaskGenie Telegram bot:", error);
+    process.exit(1);
+  }
+}
+
+// Start the bot
+startBot();
 
 // Enable graceful stop
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM")); 
+process.once("SIGINT", () => {
+  console.log("🛑 Stopping TaskGenie bot...");
+  if (WEBHOOK_URL) {
+    bot.telegram.deleteWebhook().then(() => {
+      console.log("📡 Webhook deleted");
+      process.exit(0);
+    });
+  } else {
+    bot.stop("SIGINT");
+  }
+});
+
+process.once("SIGTERM", () => {
+  console.log("🛑 Stopping TaskGenie bot...");
+  if (WEBHOOK_URL) {
+    bot.telegram.deleteWebhook().then(() => {
+      console.log("📡 Webhook deleted");
+      process.exit(0);
+    });
+  } else {
+    bot.stop("SIGTERM");
+  }
+}); 

@@ -560,13 +560,10 @@ async function startBot() {
     if (WEBHOOK_URL) {
       // Production mode - use webhooks
       console.log("🌐 Starting in WEBHOOK mode...");
+      console.log(`🔧 Using PORT: ${PORT}`);
       
-      // Set webhook
-      await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
-      console.log(`📡 Webhook set to: ${WEBHOOK_URL}/webhook`);
-      
-      // Start Express server
-      app.listen(PORT, () => {
+      // Start Express server FIRST
+      const server = app.listen(PORT, async () => {
         console.log("🚀 TaskGenie Telegram bot started successfully!");
         console.log(`🌐 Server running on port ${PORT}`);
         console.log("✅ Production features active:");
@@ -576,6 +573,20 @@ async function startBot() {
         console.log("   • Help system");
         console.log("🔄 Ready for reminder notifications");
         console.log("🤖 AI features: In development");
+        
+        // THEN set webhook after server is confirmed running
+        try {
+          await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
+          console.log(`📡 Webhook set to: ${WEBHOOK_URL}/webhook`);
+        } catch (webhookError) {
+          console.error("❌ Failed to set webhook:", webhookError);
+        }
+      });
+      
+      // Handle server startup errors
+      server.on('error', (error) => {
+        console.error("❌ Express server error:", error);
+        process.exit(1);
       });
     } else {
       // Development mode - use polling

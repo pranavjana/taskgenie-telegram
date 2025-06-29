@@ -1,12 +1,19 @@
 require("dotenv").config(); // For loading environment variables from .env file
 const { Telegraf } = require("telegraf");
-// Node's built-in fetch is available in Node.js v18+
-// If using an older version, you might need a library like 'node-fetch' or 'axios'
-// const fetch = require('node-fetch'); // Uncomment if using node-fetch
+const { fmt, bold, italic, link } = require("telegraf/format");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEB_APP_VERIFY_ENDPOINT = process.env.WEB_APP_VERIFY_ENDPOINT; // Your Next.js endpoint
-const AI_CHAT_ENDPOINT = process.env.AI_CHAT_ENDPOINT || 'http://localhost:3000/api/ai/chat'; // Your AI chat endpoint
+// const AI_CHAT_ENDPOINT = process.env.AI_CHAT_ENDPOINT || 'http://localhost:3000/api/ai/chat'; // Fixed default port
+// const CONVERSATION_ENDPOINT = process.env.CONVERSATION_ENDPOINT || 'http://localhost:3000/api/telegram/conversation'; // Fixed default port
+
+// Debug environment variables
+console.log('[Bot] Environment variables loaded:', {
+  BOT_TOKEN: BOT_TOKEN ? 'Set' : 'Missing',
+  WEB_APP_VERIFY_ENDPOINT,
+  // AI_CHAT_ENDPOINT,
+  // CONVERSATION_ENDPOINT
+});
 
 if (!BOT_TOKEN) {
   console.error(
@@ -26,7 +33,6 @@ const bot = new Telegraf(BOT_TOKEN);
 // Helper function to check if user is connected
 async function isUserConnected(telegramUserId) {
   try {
-    // You'll need to implement this endpoint to check connection status
     const response = await fetch(`${WEB_APP_VERIFY_ENDPOINT.replace('/verify', '/check-connection')}`, {
       method: 'POST',
       headers: {
@@ -48,7 +54,98 @@ async function isUserConnected(telegramUserId) {
   }
 }
 
-// Helper function to process AI chat
+// COMMENTED OUT: Conversation history and AI chat functionality
+/*
+// Helper function to get conversation history
+async function getConversationHistory(telegramUserId) {
+  try {
+    const response = await fetch(`${CONVERSATION_ENDPOINT}?telegramUserId=${telegramUserId}`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (response.ok) {
+      const data = await response.json();
+      return data.history || [];
+    }
+    return [];
+  } catch (error) {
+    console.error('Error getting conversation history:', error);
+    return [];
+  }
+}
+
+// Helper function to check if context should be included
+function shouldIncludeContext(userMessage, historyLength, conversationHistory = []) {
+  if (historyLength === 0) return false;
+  
+  // Check if the last message was a question - if so, short responses likely need context
+  if (conversationHistory.length > 0) {
+    const lastAssistantMessage = conversationHistory
+      .filter(msg => msg.role === 'assistant')
+      .pop();
+    
+    if (lastAssistantMessage && lastAssistantMessage.content.includes('?')) {
+      // If the user's message is short (likely an answer), include context
+      if (userMessage.trim().split(' ').length <= 3) {
+        console.log('[Bot] Short response after question detected, including context');
+        return true;
+      }
+    }
+  }
+  
+  const contextTriggers = [
+    // Reference to previous conversation
+    /\b(this|that|these|those|it|them)\b/i,
+    /\b(the one|the task|the project|the reminder)\b/i,
+    
+    // Follow-up words
+    /\b(also|additionally|furthermore|moreover|and|plus)\b/i,
+    /\b(continue|keep going|more|another)\b/i,
+    
+    // Clarification requests
+    /\b(what about|what if|how about)\b/i,
+    /\b(instead|rather|or)\b/i,
+    
+    // Task/project context references
+    /\b(add it|create it|make it|do it|set it)\b/i,
+    /\b(for today|for tomorrow|for this week)\b/i,
+    /\b(to that|with that|about that)\b/i,
+    
+    // Questions that might need context
+    /^(yes|no|sure|ok|okay|alright)\b/i,
+    /^(can you|could you|would you|will you)\b/i,
+    
+    // Ambiguous references
+    /\b(same|similar|like before|as mentioned)\b/i,
+    /\b(the project|the task|the reminder|the meeting)\b/i
+  ];
+
+  return contextTriggers.some(trigger => trigger.test(userMessage));
+}
+
+// Helper function to add message to conversation history
+async function addToConversationHistory(telegramUserId, role, content) {
+  try {
+    await fetch(CONVERSATION_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        telegramUserId: telegramUserId.toString(),
+        role: role,
+        content: content
+      })
+    });
+  } catch (error) {
+    console.error('Error adding to conversation history:', error);
+  }
+}
+
+// Helper function to process AI chat with intelligent context
 async function processAIChat(ctx, message) {
   const telegramUserId = ctx.from.id;
   const userName = ctx.from.first_name || 'User';
@@ -56,7 +153,8 @@ async function processAIChat(ctx, message) {
   console.log('[Bot] Processing AI chat:', {
     telegramUserId,
     userName,
-    message: message.substring(0, 50) + '...',
+    message: message.length > 100 ? message.substring(0, 100) + '...' : message, // Show more of the message
+    fullMessage: message, // Log the full message for debugging
     endpoint: AI_CHAT_ENDPOINT
   });
   
@@ -64,13 +162,38 @@ async function processAIChat(ctx, message) {
     // Send typing indicator
     await ctx.replyWithChatAction('typing');
     
-    const requestBody = {
-      messages: [
+    // Get conversation history and decide if context should be included
+    const conversationHistory = await getConversationHistory(telegramUserId);
+    const includeContext = shouldIncludeContext(message, conversationHistory.length, conversationHistory);
+    
+    console.log(`[Bot] Conversation context: ${conversationHistory.length} messages, include context: ${includeContext}`);
+    
+    // Build messages array with intelligent context inclusion
+    let messages;
+    
+    if (includeContext && conversationHistory.length > 0) {
+      // Include recent conversation history for context
+      messages = [
+        ...conversationHistory,
         {
           role: 'user',
           content: message
         }
-      ],
+      ];
+      console.log(`[Bot] Including ${conversationHistory.length} previous messages for context`);
+    } else {
+      // Use just the current message
+      messages = [
+        {
+          role: 'user',
+          content: message
+        }
+      ];
+      console.log('[Bot] Processing message without historical context');
+    }
+    
+    const requestBody = {
+      messages: messages,
       telegramContext: {
         userId: telegramUserId,
         userName: userName,
@@ -80,6 +203,8 @@ async function processAIChat(ctx, message) {
     
     console.log('[Bot] Sending request to AI API:', {
       url: AI_CHAT_ENDPOINT,
+      messageCount: messages.length,
+      hasContext: includeContext,
       bodyPreview: JSON.stringify(requestBody).substring(0, 200) + '...'
     });
     
@@ -99,7 +224,7 @@ async function processAIChat(ctx, message) {
       throw new Error(`AI service error: ${response.statusText}`);
     }
 
-    // Simple approach: collect full response then send
+    // Process streaming response
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let fullResponse = '';
@@ -118,10 +243,13 @@ async function processAIChat(ctx, message) {
       const lines = chunk.split('\n');
 
       for (const line of lines) {
+        console.log('[Bot] Processing line:', line.substring(0, 150));
+        
+        // Handle different streaming formats
         if (line.startsWith('0:')) {
           try {
             const content = line.substring(2); // Remove "0:" prefix
-            console.log('[Bot] Raw content:', content);
+            console.log('[Bot] Raw content (0:):', content);
             
             // The content is a JSON string, so parse it to get the actual text
             if (content.startsWith('"') && content.endsWith('"')) {
@@ -131,8 +259,35 @@ async function processAIChat(ctx, message) {
               console.log('[Bot] Current fullResponse length:', fullResponse.length);
             }
           } catch (parseError) {
-            console.log('[Bot] Parse error:', parseError.message, 'for line:', line.substring(0, 100));
+            console.log('[Bot] Parse error (0:):', parseError.message, 'for line:', line.substring(0, 100));
           }
+        } else if (line.startsWith('1:')) {
+          // Handle text delta format
+          try {
+            const content = line.substring(2); // Remove "1:" prefix
+            console.log('[Bot] Raw content (1:):', content);
+            const parsed = JSON.parse(content);
+            if (parsed && typeof parsed === 'string') {
+              fullResponse += parsed;
+              console.log('[Bot] Added text delta:', parsed);
+            } else if (parsed && parsed.textDelta) {
+              fullResponse += parsed.textDelta;
+              console.log('[Bot] Added textDelta:', parsed.textDelta);
+            }
+          } catch (parseError) {
+            console.log('[Bot] Parse error (1:):', parseError.message, 'for line:', line.substring(0, 100));
+          }
+        } else if (line.startsWith('2:') || line.startsWith('8:') || line.startsWith('9:')) {
+          // Handle other stream events (tool calls, etc.)
+          try {
+            const content = line.substring(2);
+            const parsed = JSON.parse(content);
+            console.log('[Bot] Stream event:', line.substring(0, 2), typeof parsed === 'object' ? Object.keys(parsed) : parsed);
+          } catch (parseError) {
+            console.log('[Bot] Parse error (other):', parseError.message, 'for line:', line.substring(0, 100));
+          }
+        } else if (line.trim() && !line.startsWith('data:')) {
+          console.log('[Bot] Unrecognized line format:', line.substring(0, 100));
         }
       }
     }
@@ -155,26 +310,56 @@ async function processAIChat(ctx, message) {
       } else {
         await ctx.reply(fullResponse.trim());
       }
+      
+      // Store conversation history (both user message and AI response)
+      // Note: The API endpoint already stores these, but we can also store them here for redundancy
+      await addToConversationHistory(telegramUserId, 'user', message);
+      await addToConversationHistory(telegramUserId, 'assistant', fullResponse.trim());
+      
     } else {
-      await ctx.reply("I processed your message, but I don't have a specific response. How can I help you further?");
+      const fallbackResponse = "I processed your message, but I don't have a specific response. How can I help you further?";
+      await ctx.reply(fallbackResponse);
+      
+      // Store conversation history
+      await addToConversationHistory(telegramUserId, 'user', message);
+      await addToConversationHistory(telegramUserId, 'assistant', fallbackResponse);
     }
 
   } catch (error) {
     console.error('AI Chat Error:', error);
-    await ctx.reply('❌ Sorry, I encountered an error processing your message. Please try again or rephrase your request.');
+    const errorResponse = '❌ Sorry, I encountered an error processing your message. Please try again or rephrase your request.';
+    await ctx.reply(errorResponse);
+    
+    // Store error in conversation history
+    await addToConversationHistory(telegramUserId, 'user', message);
+    await addToConversationHistory(telegramUserId, 'assistant', errorResponse);
   }
 }
+*/
 
-// Start command
+// Start command - Production ready welcome message
 bot.start((ctx) => {
-  ctx.reply(
-    "Welcome! I can help you connect your account.\n" +
-      "Please get a connection token from the web application and then send it to me using the command:\n" +
-      "/verify YOUR_TOKEN_HERE",
-  );
+  const userName = ctx.from.first_name || 'there';
+  ctx.reply(fmt`🚀 Welcome to TaskGenie, ${userName}!
+
+TaskGenie is your intelligent productivity assistant that helps you stay organized and on top of your tasks.
+
+🤖 ${bold`AI Features`}: Currently in development - look out for exciting AI-powered task management coming soon!
+
+🔔 ${bold`Available Now`}: Reminder notifications to keep you on track with your important tasks and deadlines.
+
+📱 ${bold`Get Started`}: Connect your TaskGenie account to receive personalized notifications:
+1. Visit your TaskGenie web app at ${link('taskgenie-ai.vercel.app', 'https://taskgenie-ai.vercel.app/')}
+2. Go to Settings → Telegram Integration
+3. Generate a connection token
+4. Send me: /verify YOUR_TOKEN_HERE
+
+🎯 Once connected, you'll receive timely reminders for all your important tasks!
+
+Need help? Just type /help for more information.`);
 });
 
-// Command to verify the token
+// Command to verify the token (KEEPING THIS - Identity verification functionality)
 bot.command("verify", async (ctx) => {
   const text = ctx.message.text;
   const parts = text.split(" "); // Split the command and the token
@@ -207,24 +392,39 @@ bot.command("verify", async (ctx) => {
     const responseData = await response.json();
 
     if (response.ok) {
-      // Assuming your web app sends a success message
+      // Success message for verification
       ctx.reply(
         responseData.message ||
-          `Token verified successfully! Your Telegram User ID is ${telegramUserId} and Chat ID is ${chatId}.`,
+          fmt`✅ ${bold`Account Connected Successfully!`}
+
+🎉 Great news! Your TaskGenie account is now connected to Telegram.
+
+🔔 ${bold`What's Next:`}
+• You'll now receive reminder notifications for your tasks
+• Get alerts for upcoming deadlines
+• Stay on top of your productivity goals
+
+🤖 ${bold`Coming Soon:`} AI-powered task management and smart conversations!
+
+Your connection details:
+📱 Telegram ID: ${telegramUserId}
+💬 Chat ID: ${chatId}`
       );
-      // Here, your web app should have created an entry in `telegram_connections`
       
-      // Additional welcome message with AI capabilities
-      setTimeout(() => {
-        ctx.reply(
-          "🤖 Great! Now I'm your AI assistant. You can:\n\n" +
-          "📝 Create tasks: 'Create a task to call the client tomorrow'\n" +
-          "🔍 Search tasks: 'What tasks do I have today?'\n" +
-          "💡 Ask questions: 'Help me prioritize my work'\n" +
-          "💾 Save info: 'Remember I prefer morning meetings'\n\n" +
-          "Just chat with me naturally!"
-        );
-      }, 1000);
+              // Additional welcome message for connected users
+        setTimeout(() => {
+          ctx.reply(fmt`🚀 ${bold`You're all set!`}
+
+Your TaskGenie notifications are now active. Here's what you can expect:
+
+📅 ${bold`Daily Reminders`} - Never miss an important task
+⏰ ${bold`Deadline Alerts`} - Stay ahead of due dates
+🎯 ${bold`Goal Tracking`} - Keep your productivity on track
+
+💡 ${bold`Pro Tip:`} Make sure to enable notifications in your Telegram settings to get the most out of TaskGenie!
+
+Questions? Type /help anytime.`);
+        }, 2000);
     } else {
       // Assuming your web app sends an error message
       ctx.reply(
@@ -239,55 +439,113 @@ bot.command("verify", async (ctx) => {
   }
 });
 
-// Help command
+// COMMENTED OUT: Clear command
+/*
+// Command to clear conversation history
+bot.command("clear", async (ctx) => {
+  const telegramUserId = ctx.from.id;
+  
+  try {
+    const response = await fetch(`${CONVERSATION_ENDPOINT}?telegramUserId=${telegramUserId}`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+      }
+    });
+    
+    if (response.ok) {
+      ctx.reply("🧹 Conversation history cleared! Starting fresh.");
+    } else {
+      ctx.reply("❌ Failed to clear conversation history. Please try again.");
+    }
+  } catch (error) {
+    console.error("Error clearing conversation history:", error);
+    ctx.reply("❌ Error clearing conversation history. Please try again later.");
+  }
+});
+*/
+
+// Help command - Production ready help message
 bot.command("help", (ctx) => {
-  ctx.reply(
-    "🤖 TaskGenie AI Assistant\n\n" +
-    "Commands:\n" +
-    "/start - Welcome message\n" +
-    "/verify <token> - Connect your account\n" +
-    "/help - Show this help\n\n" +
-    "Once connected, just chat naturally! I can:\n" +
-    "📝 Create and manage tasks\n" +
-    "🔍 Search your existing tasks\n" +
-    "💡 Answer questions from your knowledge\n" +
-    "📊 Help with planning and priorities"
-  );
+  ctx.reply(fmt`🤖 ${bold`TaskGenie Bot Help`}
+
+${bold`Available Commands:`}
+/start - Show welcome message
+/verify <token> - Connect your TaskGenie account
+/help - Show this help message
+
+${bold`Current Features:`}
+🔔 ${bold`Reminder Notifications`} - Get notified about your important tasks and deadlines
+
+${bold`Coming Soon:`}
+🤖 ${bold`AI Assistant`} - Smart task management with conversation memory
+📝 ${bold`Task Creation`} - Create tasks directly through chat
+🔍 ${bold`Smart Search`} - Find tasks using natural language
+💡 ${bold`Context Understanding`} - AI that remembers your preferences
+
+${bold`Getting Started:`}
+1. Make sure you have a TaskGenie account at ${link('taskgenie-ai.vercel.app', 'https://taskgenie-ai.vercel.app/')}
+2. Generate a connection token in your web app settings
+3. Use /verify <your-token> to connect
+4. Start receiving notifications!
+
+${bold`Need Support?`}
+Visit our help center or contact support through the TaskGenie web app.`);
 });
 
-// Generic message handler - UPDATED to include AI chat
+// Message handler for production - handles unconnected users
 bot.on("message", async (ctx) => {
   if (ctx.message.text && !ctx.message.text.startsWith("/")) {
     const telegramUserId = ctx.from.id;
-    const userName = ctx.from.first_name || 'User';
+    const userName = ctx.from.first_name || 'there';
     
     // Check if user is connected
     const connected = await isUserConnected(telegramUserId);
     
-    if (connected) {
-      // User is connected - process with AI
-      await processAIChat(ctx, ctx.message.text);
-    } else {
-      // User not connected - show connection instructions
-      ctx.reply(
-        `👋 Hi ${userName}! I'm TaskGenie, your AI productivity assistant.\n\n` +
-        `To get started, please connect your account:\n` +
-        `1. Visit your TaskGenie settings page\n` +
-        `2. Generate a connection token\n` +
-        `3. Send me: /verify <your-token>\n\n` +
-        `Once connected, I can help you manage tasks, answer questions, and more!`
-      );
+          if (connected) {
+        // User is connected - for now, just acknowledge (AI features coming soon)
+        ctx.reply(fmt`👋 Hi ${userName}! Thanks for your message.
+
+🤖 ${bold`AI chat features are currently in development`} and will be available soon!
+
+For now, you're all set to receive reminder notifications for your TaskGenie tasks.
+
+Need help? Type /help for more information.`);
+          } else {
+        // User not connected - show connection instructions
+        ctx.reply(fmt`👋 Hi ${userName}! I see you're trying to chat with me.
+
+🔗 ${bold`First, let's connect your TaskGenie account`} so you can receive reminder notifications:
+
+1. Visit your TaskGenie web app at ${link('taskgenie-ai.vercel.app', 'https://taskgenie-ai.vercel.app/')}
+2. Go to Settings → Telegram Integration
+3. Generate a connection token
+4. Send me: /verify YOUR_TOKEN_HERE
+
+🚀 Once connected, you'll be ready for our upcoming AI features!
+
+Type /help for more information.`);
     }
   }
 });
 
+// TODO: Add reminder notification functionality here
+// This is where you would add code to handle sending reminder notifications to users
+
 bot
   .launch()
   .then(() => {
-    console.log("Telegram bot started successfully!");
+    console.log("🚀 TaskGenie Telegram bot started successfully!");
+    console.log("✅ Production features active:");
+    console.log("   • Welcome messages");
+    console.log("   • Account verification");
+    console.log("   • User guidance");
+    console.log("   • Help system");
+    console.log("🔄 Ready for reminder notifications");
+    console.log("🤖 AI features: In development");
   })
   .catch((err) => {
-    console.error("Failed to start Telegram bot:", err);
+    console.error("❌ Failed to start TaskGenie Telegram bot:", err);
   });
 
 // Enable graceful stop

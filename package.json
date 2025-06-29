@@ -1,16 +1,21 @@
 {
   "name": "taskgenie-telegram",
   "version": "1.0.0",
-  "main": "index.js",
+  "description": "TaskGenie Telegram Bot - Smart productivity assistant with reminder notifications",
+  "main": "bot/bot.js",
   "scripts": {
+    "start": "node bot/bot.js",
+    "dev": "node bot/bot.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["telegram", "bot", "productivity", "reminders", "taskgenie"],
+  "author": "TaskGenie Team",
   "license": "ISC",
-  "description": "",
   "dependencies": {
     "dotenv": "^16.5.0",
     "telegraf": "^4.16.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
   }
 }

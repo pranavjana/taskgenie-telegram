@@ -1,7 +1,6 @@
 require("dotenv").config(); // For loading environment variables from .env file
 const { Telegraf } = require("telegraf");
 const { fmt, bold, italic, link } = require("telegraf/format");
-const express = require("express");
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const WEB_APP_VERIFY_ENDPOINT = process.env.WEB_APP_VERIFY_ENDPOINT; // Your Next.js endpoint
@@ -535,59 +534,34 @@ Type /help for more information.`);
 // TODO: Add reminder notification functionality here
 // This is where you would add code to handle sending reminder notifications to users
 
-// Create Express app for webhook
-const app = express();
-app.use(express.json());
-
-// Health check endpoint
-app.get("/", (req, res) => {
-  res.json({ 
-    status: "TaskGenie Telegram Bot is running!",
-    timestamp: new Date().toISOString(),
-    features: ["welcome messages", "account verification", "reminder notifications"]
-  });
-});
-
-// Webhook endpoint
-app.post("/webhook", (req, res) => {
-  bot.handleUpdate(req.body);
-  res.sendStatus(200);
-});
-
 // Start the server
 async function startBot() {
   try {
     if (WEBHOOK_URL) {
-      // Production mode - use webhooks
+      // Production mode - use webhooks (Telegraf built-in)
       console.log("🌐 Starting in WEBHOOK mode...");
       console.log(`🔧 Using PORT: ${PORT}`);
+      console.log(`🔗 Domain: ${WEBHOOK_URL}`);
       
-      // Start Express server FIRST
-      const server = app.listen(PORT, async () => {
-        console.log("🚀 TaskGenie Telegram bot started successfully!");
-        console.log(`🌐 Server running on port ${PORT}`);
-        console.log("✅ Production features active:");
-        console.log("   • Welcome messages");
-        console.log("   • Account verification");
-        console.log("   • User guidance");
-        console.log("   • Help system");
-        console.log("🔄 Ready for reminder notifications");
-        console.log("🤖 AI features: In development");
-        
-        // THEN set webhook after server is confirmed running
-        try {
-          await bot.telegram.setWebhook(`${WEBHOOK_URL}/webhook`);
-          console.log(`📡 Webhook set to: ${WEBHOOK_URL}/webhook`);
-        } catch (webhookError) {
-          console.error("❌ Failed to set webhook:", webhookError);
+      await bot.launch({
+        webhook: {
+          // Remove https:// prefix for domain
+          domain: WEBHOOK_URL.replace('https://', '').replace('http://', ''),
+          port: PORT,
+          hookPath: '/webhook'
         }
       });
       
-      // Handle server startup errors
-      server.on('error', (error) => {
-        console.error("❌ Express server error:", error);
-        process.exit(1);
-      });
+      console.log("🚀 TaskGenie Telegram bot started successfully!");
+      console.log(`🌐 Webhook server running on port ${PORT}`);
+      console.log(`📡 Webhook endpoint: ${WEBHOOK_URL}/webhook`);
+      console.log("✅ Production features active:");
+      console.log("   • Welcome messages");
+      console.log("   • Account verification");
+      console.log("   • User guidance");
+      console.log("   • Help system");
+      console.log("🔄 Ready for reminder notifications");
+      console.log("🤖 AI features: In development");
     } else {
       // Development mode - use polling
       console.log("🔄 Starting in POLLING mode (development)...");
@@ -613,24 +587,10 @@ startBot();
 // Enable graceful stop
 process.once("SIGINT", () => {
   console.log("🛑 Stopping TaskGenie bot...");
-  if (WEBHOOK_URL) {
-    bot.telegram.deleteWebhook().then(() => {
-      console.log("📡 Webhook deleted");
-      process.exit(0);
-    });
-  } else {
-    bot.stop("SIGINT");
-  }
+  bot.stop("SIGINT");
 });
 
 process.once("SIGTERM", () => {
   console.log("🛑 Stopping TaskGenie bot...");
-  if (WEBHOOK_URL) {
-    bot.telegram.deleteWebhook().then(() => {
-      console.log("📡 Webhook deleted");
-      process.exit(0);
-    });
-  } else {
-    bot.stop("SIGTERM");
-  }
+  bot.stop("SIGTERM");
 }); 
